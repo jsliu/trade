@@ -11,8 +11,7 @@ from scipy.stats import norm
 from ib_async import IB, Stock, Option, Order
 
 # get greeks
-async def get_leg_data(ib, leg):
-    symbol = leg["symbol"]
+async def get_leg_data(ib, symbol, leg):
     expiry = leg["expiry"]
     strike = leg["strike"]
     right = leg["right"]
@@ -85,7 +84,7 @@ async def get_margin_requirement(ib, contract):
 
 
 # compute metrics for combo
-async def evaluate_strategy(ib, legs, spot, iv_crush_pct=0.2):
+async def evaluate_strategy(ib, symbol, legs, spot, iv_crush_pct=0.2):
     net_gamma = 0
     net_theta = 0
     net_delta = 0
@@ -95,7 +94,7 @@ async def evaluate_strategy(ib, legs, spot, iv_crush_pct=0.2):
     days = 30
 
     for leg in legs:
-        data = await get_leg_data(ib, leg)
+        data = await get_leg_data(ib, symbol, leg)
         if data is None:
             return None
         net_gamma += data["gamma"]
@@ -111,8 +110,8 @@ async def evaluate_strategy(ib, legs, spot, iv_crush_pct=0.2):
         pnl = 0
 
         for leg in legs:
-            sign = 1 if leg["side"] == "BUY" else -1
-            qty = leg["contracts"]
+            sign = 1 if leg["action"] == "BUY" else -1
+            qty = leg["quantity"]
 
             if leg["right"] == "C":
                 intrinsic = max(price - leg["strike"], 0)
@@ -252,8 +251,6 @@ def dynamic_rank(results, regime):
 
     return sorted(results.items(), key=key_func, reverse=reverse)
 
-
-
 async def main(symbol, strategies):
 
     ib = IB()
@@ -278,7 +275,7 @@ async def main(symbol, strategies):
 
         results = {}
         for name, legs in strategies.items():
-            metrics = await evaluate_strategy(ib, legs, spot)
+            metrics = await evaluate_strategy(ib, symbol, legs, spot)
             if metrics:
                 results[name] = metrics
 
