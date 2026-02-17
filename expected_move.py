@@ -91,15 +91,43 @@ async def compute_expected_move(ib, symbol, ann_factor=252):
         sigmaE_sq = T1 * (iv1**2 - sigma12**2) / dtE + sigma12**2
         sigmaE = math.sqrt(sigmaE_sq)
 
-        # ---- Expected move ----
-        expected_move = sigmaE / math.sqrt(ann_factor)
-        return expected_move
+        # ---- Expected earnings move ----
+        earnings_move_pct = sigmaE
+        earnings_move_abs = spot * earnings_move_pct
+
+        # ---- Full move to expiration ----
+        total_move_pct = iv1 * math.sqrt(T1)
+        total_move_abs = spot * total_move_pct
+
+        # ---- Diffusion component (non-earnings) ----
+        diffusion_pct = sigma12 * math.sqrt(T1 - dtE)
+        diffusion_abs = spot * diffusion_pct
+      
+        return {
+                "spot": spot,
+                "expiry1": exp1,
+                "expiry2": exp2,
+                "iv1": iv1,
+                "iv2": iv2,
+                "T1": T1,
+                "T2": T2,
+                "diffusion_vol": sigma12,
+                "earnings_vol": sigmaE,
+                "earnings_move_pct": earnings_move_pct,
+                "earnings_move_abs": earnings_move_abs,
+                "earnings_range": (spot - earnings_move_abs,
+                                spot + earnings_move_abs),
+                "total_move_pct": total_move_pct,
+                "total_range": (spot - total_move_abs,
+                                spot + total_move_abs),
+                "diffusion_move_pct": diffusion_pct
+        }
     
     except Exception as e:
         print(f"Error computing expected move for {symbol}: {e}")
-        return float('nan')
+        return None
 
-async def main(symbols, prices):
+async def main(symbols):
     # load symbols from csv
     # df = pd.read_csv(watchlist)
     # if "Financial Instrument" not in df.columns:
@@ -121,15 +149,22 @@ async def main(symbols, prices):
         # watchlist_symbols = ["AAPL", "MSFT", "GOOG"]  # replace with your watchlist symbols
 
         results = {}
-        for symbol, price in zip(symbols, prices):
-            move = await compute_expected_move(ib, symbol)
-            if math.isnan(move):
-                print(f"{symbol}: expected move not available")
-            else:
-                print(f"{symbol}: expected move = {move:.2%}: [{price * (1-move):.1f}, {price * (1+move):.1f}]")
-            results[symbol] = move
+        for symbol in symbols:
+            data = await compute_expected_move(ib, symbol)
 
-        return results
+            if not data:
+                print(f"{symbol}: not available")
+                continue
+
+            print(f"\n{symbol}")
+            print(f"Spot: {data['spot']:.2f}")
+            print(f"Earnings Move: {data['earnings_move_pct']:.2%} "
+                f"[{data['earnings_range'][0]:.2f}, {data['earnings_range'][1]:.2f}]")
+
+            print(f"Diffusion Vol (post-event): {data['diffusion_vol']:.2%}")
+
+            print(f"Total Move to Exp: {data['total_move_pct']:.2%} "
+                f"[{data['total_range'][0]:.2f}, {data['total_range'][1]:.2f}]")
 
     finally:
         if ib.isConnected():
@@ -138,8 +173,5 @@ async def main(symbols, prices):
 if __name__ == "__main__":
     nest_asyncio.apply()
     symbols = ['HL', ]
-    prices = [22.66, ]
-    result = asyncio.run(main(symbols, prices))
-    # result = await main('short.csv')
-    # pd.DataFrame(result, index=['ExpectedMove']).T.to_csv(f'expected move/expected_move_{datetime.datetime.now()}.csv')
+    asyncio.run(main(symbols))
 # %%
