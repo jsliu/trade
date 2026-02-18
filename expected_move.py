@@ -120,7 +120,11 @@ async def compute_expected_move(ib, symbol, ann_factor=252):
                 "total_move_pct": total_move_pct,
                 "total_range": (spot - total_move_abs,
                                 spot + total_move_abs),
-                "diffusion_move_pct": diffusion_pct
+                "diffusion_move_pct": diffusion_pct,
+                "diffusion_move_abs": diffusion_abs,
+                "diffusion_range": (spot - diffusion_abs,
+                                    spot + diffusion_abs),
+
         }
     
     except Exception as e:
@@ -158,13 +162,21 @@ async def main(symbols):
 
             print(f"\n{symbol}")
             print(f"Spot: {data['spot']:.2f}")
-            print(f"Earnings Move: {data['earnings_move_pct']:.2%} "
-                f"[{data['earnings_range'][0]:.2f}, {data['earnings_range'][1]:.2f}]")
+            
+            print(f"\n--- Earnings Jump ---")
+            print(f"Move: {data['earnings_move_pct']:.2%}")
+            print(f"Range: [{data['earnings_range'][0]:.2f}, "
+                f"{data['earnings_range'][1]:.2f}]")
 
-            print(f"Diffusion Vol (post-event): {data['diffusion_vol']:.2%}")
+            print(f"\n--- Post-Earnings Diffusion ---")
+            print(f"Move: {data['diffusion_move_pct']:.2%}")
+            print(f"Range: [{data['diffusion_range'][0]:.2f}, "
+                f"{data['diffusion_range'][1]:.2f}]")
 
-            print(f"Total Move to Exp: {data['total_move_pct']:.2%} "
-                f"[{data['total_range'][0]:.2f}, {data['total_range'][1]:.2f}]")
+            print(f"\n--- Total Move to Expiration ---")
+            print(f"Move: {data['total_move_pct']:.2%}")
+            print(f"Range: [{data['total_range'][0]:.2f}, "
+                f"{data['total_range'][1]:.2f}]")
 
     finally:
         if ib.isConnected():

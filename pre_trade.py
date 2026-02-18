@@ -8,7 +8,7 @@ import math
 import pandas as pd
 import numpy as np
 from scipy.stats import norm
-from ib_async import IB, Stock, Option, Order
+from ib_async import IB, Stock, Option, Order, ComboLeg, Contract
 
 # get greeks
 async def get_leg_data(ib, symbol, leg):
@@ -68,9 +68,25 @@ def find_break_even(spot, payoff_func):
 
     return None
 
-# margin
-async def get_margin_requirement(ib, contract):
+# Analytical shortcut using break-even
+def probability_of_profit(spot, break_even, iv, days):
+    if iv <= 0 or days <= 0:
+        return np.nan
 
+    sigma = iv * np.sqrt(days / 365)
+
+    if sigma == 0:
+        return np.nan
+
+    z = np.log(break_even / spot) / sigma
+
+    return 1 - norm.cdf(z)
+
+def expected_value_short(credit, max_loss, pop):
+    return credit * pop - max_loss * (1 - pop)
+
+# Real broker margin request
+async def get_margin_requirement(ib, combo_contract):
     order = Order(
         action="BUY",
         orderType="MKT",
@@ -78,10 +94,22 @@ async def get_margin_requirement(ib, contract):
         transmit=False
     )
 
-    w = await ib.whatIfOrderAsync(contract, order)
-    return abs(w.initMarginChange or 1)
+    whatif = await ib.whatIfOrderAsync(combo_contract, order)
 
+    return {
+        "init_margin": whatif.initMarginChange,
+        "maint_margin": whatif.maintMarginChange
+    }
 
+def calculate_margin_efficiency(expected_value, init_margin):
+    if init_margin == 0:
+        return 0
+    return expected_value / init_margin
+
+def estimate_max_loss(spot, payoff):
+    prices = np.linspace(spot*0.5, spot*1.5, 500)
+    losses = [payoff(p) for p in prices]
+    return abs(min(losses))
 
 # compute metrics for combo
 async def evaluate_strategy(ib, symbol, legs, spot, iv_crush_pct=0.2):
@@ -132,10 +160,37 @@ async def evaluate_strategy(ib, symbol, legs, spot, iv_crush_pct=0.2):
     efficiency_expected_value = ev / abs(net_premium) if net_premium != 0 else float('nan')
 
     breakeven = find_break_even(spot, payoff)
+
+    # probability of profit
+    pop = probability_of_profit(spot, breakeven, iv_used, days) if breakeven else np.nan
+
+    # Break-even %
     breakeven_pct = ((breakeven - spot)/spot) if breakeven else None
 
-    # Break-even &
-    breakeven_pct = abs(net_premium) / (abs(net_delta) * spot * 100) if abs(net_delta) > 1e-6 else float('inf')
+    # max loss
+    max_loss = estimate_max_loss(spot, payoff)
+    
+    # combo = Contract()
+    # combo.symbol = symbol
+    # combo.secType = "BAG"
+    # combo.currency = "USD"
+    # combo.exchange = "SMART"
+    # combo.comboLegs = []
+    # for leg in legs:
+    #     opt = Option(symbol, leg["expiry"], leg["strike"], leg["right"], "SMART")
+    #     await ib.qualifyContractsAsync(opt)
+
+    #     combo_leg = ComboLeg()
+    #     combo_leg.conId = opt.conId
+    #     combo_leg.ratio = leg["quantity"]
+    #     combo_leg.action = leg["action"]
+    #     combo_leg.exchange = "SMART"
+
+    #     combo.comboLegs.append(combo_leg)
+
+    # margin_data = await get_margin_requirement(ib, combo)
+    # init_margin = margin_data["init_margin"]
+    # margin_efficiency = calculate_margin_efficiency(ev, init_margin)
 
     # PnL for ±1%, ±2%
     def pnl_for_move(move_pct):
@@ -160,6 +215,11 @@ async def evaluate_strategy(ib, symbol, legs, spot, iv_crush_pct=0.2):
         "net_theta": net_theta,
         "net_vega": net_vega,
         "premium": net_premium,
+        "expected_value": ev,
+        "probability_of_profit": pop,
+        "max_loss": max_loss,
+        # "init_margin": init_margin,
+        # "margin_efficiency": margin_efficiency,
         "efficiency_gamma_theta": efficiency,
         "efficiency_theta_gamma": efficiency_theta,
         "efficiency_gamma_premium": efficiency_gamma_premium,
@@ -303,6 +363,11 @@ async def main(symbol, strategies):
             print(f"   PnL +1%: {r['pnl_1_up']:.2f} | -1%: {r['pnl_1_dn']:.2f}")
             print(f"   PnL +2%: {r['pnl_2_up']:.2f} | -2%: {r['pnl_2_dn']:.2f}")
             print(f"   Earnings PnL (IV crush 20%): {r['earnings_pnl']:.2f}")
+            print(f"   Probability of Profit: {r['probability_of_profit']:.2%}")
+            print(f"   Expected Value: {r['expected_value']:.2f}")
+            # print(f"   Initial Margin: {r['init_margin']:.2f}")
+            # print(f"   Margin Efficiency (EV/Margin): {r['margin_efficiency']:.6f}")
+
             print("")
 
         return results
@@ -331,6 +396,4 @@ if __name__ == "__main__":
     ]
     }
     result = asyncio.run(main(symbol, strategies))
-    # result = await main('short.csv')
-    # pd.DataFrame(result, index=['ExpectedMove']).T.to_csv(f'expected move/expected_move_{datetime.datetime.now()}.csv')
 # %%
